@@ -1,11 +1,11 @@
-import chromadb
+
 import json
 
 
 class EmbedQueries:
-    def __init__(self, collection_name):
+    def __init__(self, collection_name, chromadb_client):
         self.collection = collection_name
-        self.chromadb_client = chromadb.PersistentClient(path="./chromadb")
+        self.chromadb_client = chromadb_client
         self.document_collection = self.chromadb_client.get_or_create_collection(self.collection)
 
     def chroma_query(self, query_text, n_results=5):

@@ -4,16 +4,25 @@ import ffmpeg
 
 import whisper
 
-import chromadb
+from langchain_chroma import Chroma
+from chromadb.utils import embedding_functions
+
+
 
 
 class VideoIngester:
-    def __init__(self, collection_name):
-        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1024, chunk_overlap=100)
+    def __init__(self, collection_name, chromadb_client):
+        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=128, chunk_overlap=24)
         self.whisper_model = whisper.load_model("base")
-        self.chromadb_client = chromadb.PersistentClient(path="./chromadb")
         self.collection_name = collection_name
+        self.chromadb_client = chromadb_client
         self.document_collection = self.chromadb_client.get_or_create_collection(collection_name)
+        self.vectorstore = Chroma(
+            client=chromadb_client,
+            collection_name=self.collection_name,
+            embedding_function=embedding_functions.DefaultEmbeddingFunction(),
+        )
+
 
     @staticmethod
     def _extract_audio_from_video_file(file_path):
@@ -33,10 +42,13 @@ class VideoIngester:
 
     def _add_transcript_to_collection(self, transcript_id, transcript_text, transcript_metadata=None):
         self.document_collection = self.chromadb_client.get_or_create_collection(self.collection_name)
+        splits = self.text_splitter.create_documents([transcript_text])
+        # import ipdb; ipdb.set_trace()
+        ids = [f"{transcript_id}_{index}" for index in range(len(splits))]
         self.document_collection.add(
-            documents=[transcript_text],
-            metadatas=[transcript_metadata],  # filter on these!
-            ids=[transcript_id],
+            documents=[split.page_content for split in splits],
+            metadatas=[transcript_metadata] * len(splits),  # filter on these!
+            ids=ids,
         )
 
     def ingest(self, file_path: str, file_name: str):
