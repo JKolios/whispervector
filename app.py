@@ -12,12 +12,13 @@ from langchain_community.embeddings import OllamaEmbeddings
 from langchain.prompts import PromptTemplate
 from langchain.prompts.chat import (
     ChatPromptTemplate,
-    SystemMessagePromptTemplate,
-    AIMessagePromptTemplate,
     HumanMessagePromptTemplate,
 )
 
-from langchain.chains.question_answering import load_qa_chain
+import numpy as np
+from sklearn.manifold import TSNE
+
+import plotly.express as px
 
 import chromadb
 
@@ -63,6 +64,18 @@ rag_prompt = ChatPromptTemplate(
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
+
+def plot_embeddings(embeddings, documents):
+    n_components = 3  # 3D
+    embs = np.array(embeddings)  # converting to numpy array
+    tsne = TSNE(n_components=n_components, random_state=42, perplexity=5)
+    reduced_vectors = tsne.fit_transform(embs)
+
+    reduced_vectors = np.c_[reduced_vectors, documents]
+    # Create a 3D scatter plot
+    fig = px.scatter_3d(reduced_vectors,  x=0, y=1, z=2, hover_data=[3])
+    return fig
+
 # load in qa_chain
 qa_chain = (
     {"context": retriever | format_docs, "question": RunnablePassthrough()}
@@ -73,18 +86,15 @@ qa_chain = (
 
 st.set_page_config(page_title="WhisperVector")
 
-def page():
+def user_interface():
     if len(st.session_state) == 0:
-
-        st.session_state.chroma_query = ""
-        st.session_state.chroma_response = ""
         st.session_state.file_uploader = []
-
         st.session_state.messages = []
 
     st.header("WhisperVector")
 
     st.subheader("Ingest video files")
+
     with st.form("file-uploader", clear_on_submit=True):
         uploaded_files = st.file_uploader(
             "Upload document",
@@ -108,12 +118,16 @@ def page():
 
     st.session_state["ingestion_spinner"] = st.empty()
 
+    st.subheader("Collection")
 
-    st.subheader("Collection Management")
     st.text(f"Collection: {CHROMADB_COLLECTION}")
     if st.button("Clear Collection"):
         chromadb_client.delete_collection(CHROMADB_COLLECTION)
         chromadb_client.get_or_create_collection(CHROMADB_COLLECTION)
+
+    embeddings = chromadb_client.get_or_create_collection(CHROMADB_COLLECTION).get(include=['embeddings', 'documents'])
+    if embeddings['ids']:
+        st.plotly_chart(plot_embeddings(embeddings['embeddings'], embeddings['documents']), use_container_width=False)
 
     st.subheader("LLM Chat")
 
@@ -145,4 +159,4 @@ def page():
 
 
 if __name__ == "__main__":
-    page()
+    user_interface()
