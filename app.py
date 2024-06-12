@@ -1,39 +1,77 @@
 import os
 import tempfile
-from pprint import pformat
 
 import streamlit as st
+
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 from langchain_community.llms import Ollama
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import FastEmbedEmbeddings
+from langchain_community.embeddings import OllamaEmbeddings
+
+from langchain.prompts import PromptTemplate
+from langchain.prompts.chat import (
+    ChatPromptTemplate,
+    SystemMessagePromptTemplate,
+    AIMessagePromptTemplate,
+    HumanMessagePromptTemplate,
+)
+
+from langchain.chains.question_answering import load_qa_chain
 
 import chromadb
 
 from videoingester import VideoIngester
-from embedqueries import EmbedQueries
 
 CHROMADB_COLLECTION = "transcripts"
 
 chromadb_client = chromadb.PersistentClient(path="./chromadb")
+# ensure that the collection exists
+chromadb_client.get_or_create_collection(CHROMADB_COLLECTION)
+
+vectorstore = Chroma(
+        client=chromadb_client,
+        collection_name=CHROMADB_COLLECTION,
+        embedding_function=OllamaEmbeddings(model='llama3'),
+)
+retriever = vectorstore.as_retriever()
 
 embedder = VideoIngester(
-            CHROMADB_COLLECTION,
-            chromadb_client
-        )
+            chromadb_client,
+            CHROMADB_COLLECTION
+)
 
-query_interface = EmbedQueries(
-            CHROMADB_COLLECTION,
-            chromadb_client
-        )
 
 llm = Ollama(model="llama3")
-chain = llm | StrOutputParser()
+rag_prompt = ChatPromptTemplate(
+    input_variables=['context', 'question'],
+    messages=[
+        HumanMessagePromptTemplate(
+            prompt=PromptTemplate(
+                input_variables=['context', 'question'],
+                template="""You answer questions about the contents of a transcribed audio file. 
+                Use only the provided audio file transcription as context to answer the question. 
+                Do not use any additional information.
+                If you don't know the answer, just say that you don't know. Do not use external knowledge. 
+                Make sure to reference your sources with quotes of the provided context as citations.
+                \nQuestion: {question} \nContext: {context} \nAnswer:"""
+                )
+        )
+    ]
+)
+
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
+# load in qa_chain
+qa_chain = (
+    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    | rag_prompt
+    | llm
+    | StrOutputParser()
+)
 
 st.set_page_config(page_title="WhisperVector")
-
-def clear_collection():
-    query_interface.clear_collection()
 
 def page():
     if len(st.session_state) == 0:
@@ -46,41 +84,36 @@ def page():
 
     st.header("WhisperVector")
 
-    st.subheader("Upload a video file")
-    uploaded_files = st.file_uploader(
-        "Upload document",
-        type=["mp4", "mkv"],
-        key=st.session_state.file_uploader,
-        label_visibility="collapsed",
-        accept_multiple_files=True,
-    )
+    st.subheader("Ingest video files")
+    with st.form("file-uploader", clear_on_submit=True):
+        uploaded_files = st.file_uploader(
+            "Upload document",
+            type=["mp4", "mkv"],
+            key=st.session_state.file_uploader,
+            label_visibility="collapsed",
+            accept_multiple_files=True,
+        )
+        ingested = st.form_submit_button("Ingest Files")
 
-    for file in uploaded_files:
-        with tempfile.NamedTemporaryFile(delete=False) as tf:
-            tf.write(file.getbuffer())
-            file_path = tf.name
+    if ingested and uploaded_files is not None:
+        for file in uploaded_files:
+            with tempfile.NamedTemporaryFile(delete=False) as tf:
+                tf.write(file.getbuffer())
+                file_path = tf.name
 
         with st.session_state["ingestion_spinner"], st.spinner(f"Ingesting {file.name}"):
-            segment_count = embedder.ingest(file_path, file.name)
+            segment_count = embedder.ingest_video_file(file_path)
         st.text(f"Ingested {segment_count} segments")
         os.remove(file_path)
 
-    if st.button("Clear uploaded files"):
-        st.session_state.file_uploader = []
-
     st.session_state["ingestion_spinner"] = st.empty()
 
-    st.subheader("ChromaDB Queries")
-    with st.form(key='query_form_chroma', clear_on_submit=True):
-        st.text_input('Query:', value=st.session_state.chroma_query)
-        submit_chroma_query = st.form_submit_button('Submit')
-
-    if submit_chroma_query:
-        st.write(query_interface.chroma_query(st.session_state.chroma_query))
 
     st.subheader("Collection Management")
     st.text(f"Collection: {CHROMADB_COLLECTION}")
-    st.button("Clear Collection", on_click=clear_collection)
+    if st.button("Clear Collection"):
+        chromadb_client.delete_collection(CHROMADB_COLLECTION)
+        chromadb_client.get_or_create_collection(CHROMADB_COLLECTION)
 
     st.subheader("LLM Chat")
 
@@ -89,11 +122,6 @@ def page():
             st.markdown(message["content"])
 
     if prompt := st.chat_input("LLM Prompt"):
-        # Add user message to chat history
-        # st.session_state.messages.append({"role": "user", "content": prompt})
-        # Display user message in chat message container
-        # with st.chat_message("user"):
-        #     st.markdown(prompt)
 
         with st.chat_message("user"):
             st.session_state.messages.append(
@@ -104,7 +132,7 @@ def page():
             )
             st.markdown(prompt)
 
-        response = chain.invoke(prompt)
+        response = qa_chain.invoke(prompt)
 
         with st.chat_message("assistant"):
             st.session_state.messages.append(
@@ -114,11 +142,6 @@ def page():
                  }
             )
             st.markdown(response)
-        #
-        # with st.chat_message("assistant"):
-        #     st.markdown(response)
-
-
 
 
 if __name__ == "__main__":
