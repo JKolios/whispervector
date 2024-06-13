@@ -1,6 +1,3 @@
-import os
-import tempfile
-
 import streamlit as st
 
 from langchain_core.output_parsers import StrOutputParser
@@ -15,14 +12,8 @@ from langchain.prompts.chat import (
     HumanMessagePromptTemplate,
 )
 
-import numpy as np
-from sklearn.manifold import TSNE
-
-import plotly.express as px
-
 import chromadb
 
-from videoingester import VideoIngester
 
 CHROMADB_COLLECTION = "transcripts"
 
@@ -36,11 +27,6 @@ vectorstore = Chroma(
         embedding_function=OllamaEmbeddings(model='llama3'),
 )
 retriever = vectorstore.as_retriever()
-
-embedder = VideoIngester(
-            chromadb_client,
-            CHROMADB_COLLECTION
-)
 
 
 llm = Ollama(model="llama3")
@@ -65,17 +51,6 @@ def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 
-def plot_embeddings(embeddings, documents):
-    n_components = 3  # 3D
-    embs = np.array(embeddings)  # converting to numpy array
-    tsne = TSNE(n_components=n_components, random_state=42, perplexity=5)
-    reduced_vectors = tsne.fit_transform(embs)
-
-    reduced_vectors = np.c_[reduced_vectors, documents]
-    # Create a 3D scatter plot
-    fig = px.scatter_3d(reduced_vectors,  x=0, y=1, z=2, hover_data=[3])
-    return fig
-
 # load in qa_chain
 qa_chain = (
     {"context": retriever | format_docs, "question": RunnablePassthrough()}
@@ -88,46 +63,9 @@ st.set_page_config(page_title="WhisperVector")
 
 def user_interface():
     if len(st.session_state) == 0:
-        st.session_state.file_uploader = []
         st.session_state.messages = []
 
     st.header("WhisperVector")
-
-    st.subheader("Ingest video files")
-
-    with st.form("file-uploader", clear_on_submit=True):
-        uploaded_files = st.file_uploader(
-            "Upload document",
-            type=["mp4", "mkv"],
-            key=st.session_state.file_uploader,
-            label_visibility="collapsed",
-            accept_multiple_files=True,
-        )
-        ingested = st.form_submit_button("Ingest Files")
-
-    if ingested and uploaded_files is not None:
-        for file in uploaded_files:
-            with tempfile.NamedTemporaryFile(delete=False) as tf:
-                tf.write(file.getbuffer())
-                file_path = tf.name
-
-        with st.session_state["ingestion_spinner"], st.spinner(f"Ingesting {file.name}"):
-            segment_count = embedder.ingest_video_file(file_path)
-        st.text(f"Ingested {segment_count} segments")
-        os.remove(file_path)
-
-    st.session_state["ingestion_spinner"] = st.empty()
-
-    st.subheader("Collection")
-
-    st.text(f"Collection: {CHROMADB_COLLECTION}")
-    if st.button("Clear Collection"):
-        chromadb_client.delete_collection(CHROMADB_COLLECTION)
-        chromadb_client.get_or_create_collection(CHROMADB_COLLECTION)
-
-    embeddings = chromadb_client.get_or_create_collection(CHROMADB_COLLECTION).get(include=['embeddings', 'documents'])
-    if embeddings['ids']:
-        st.plotly_chart(plot_embeddings(embeddings['embeddings'], embeddings['documents']), use_container_width=False)
 
     st.subheader("LLM Chat")
 

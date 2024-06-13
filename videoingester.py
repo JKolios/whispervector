@@ -10,7 +10,7 @@ from langchain_chroma import Chroma
 
 
 class VideoIngester:
-    def __init__(self, chromadb_client,  collection_name, whisper_model='base', embeddings_model='llama3', chunk_size=1024, chunk_overlap=128):
+    def __init__(self, chromadb_client,  collection_name, whisper_model='base', embeddings_model='llama3', chunk_size=128, chunk_overlap=16):
         self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         self.whisper_model = whisper.load_model(whisper_model)
         self.vectorstore = Chroma(
