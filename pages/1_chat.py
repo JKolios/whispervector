@@ -17,14 +17,16 @@ from Whispervector import vectorstore
 retriever = vectorstore.as_retriever()
 
 
+# llm = Ollama(model="llama3-chatqa:8b")
 llm = Ollama(model="llama3")
+
 rag_prompt = ChatPromptTemplate(
     input_variables=['context', 'question'],
     messages=[
         HumanMessagePromptTemplate(
             prompt=PromptTemplate(
                 input_variables=['context', 'question'],
-                template="""You answer questions about the contents a PDF text file. 
+                template="""You answer questions about the contents of a PDF text file. 
                 Use only information from that text file to answer questions. 
                 Do not use any additional information.
                 If you don't know the answer, just say that you don't know. Do not use external knowledge. 

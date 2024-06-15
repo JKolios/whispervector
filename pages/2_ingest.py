@@ -15,14 +15,14 @@ from Whispervector import chromadb_client, CHROMADB_COLLECTION, vectorstore
 
 
 
-ALL_DOC_TYPES = ["mp4", "mkv", ".txt", ".pdf"]
+ALL_DOC_TYPES = ["mp4", "mkv", ".txt", ".pdf", ".opus"]
 
 
 def ingest_file(file_path, original_filename):
     _, file_extension = os.path.splitext(original_filename)
     if file_extension in ['.txt']:
         ingester = TextIngester(vectorstore)
-    elif file_extension in ['.mkv', '.mp4']:
+    elif file_extension in ['.mkv', '.mp4', '.opus']:
         ingester = VideoIngester(vectorstore)
     elif file_extension in ['.pdf']:
         ingester = PDFIngester(vectorstore)
