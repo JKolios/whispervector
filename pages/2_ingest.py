@@ -3,34 +3,32 @@ import tempfile
 
 import streamlit as st
 
-import chromadb
-
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import OllamaEmbeddings
-
 import numpy as np
 from sklearn.manifold import TSNE
 
 import plotly.express as px
 
-from videoingester import VideoIngester
+from ingesters.videoingester import VideoIngester
+from ingesters.textingester import TextIngester, PDFIngester
 
-CHROMADB_COLLECTION = "transcripts"
+from Whispervector import chromadb_client, CHROMADB_COLLECTION, vectorstore
 
-chromadb_client = chromadb.PersistentClient(path="./chromadb")
-# ensure that the collection exists
-chromadb_client.get_or_create_collection(CHROMADB_COLLECTION)
 
-vectorstore = Chroma(
-        client=chromadb_client,
-        collection_name=CHROMADB_COLLECTION,
-        embedding_function=OllamaEmbeddings(model='llama3'),
-)
 
-ingester = VideoIngester(
-            chromadb_client,
-            CHROMADB_COLLECTION
-)
+ALL_DOC_TYPES = ["mp4", "mkv", ".txt", ".pdf"]
+
+
+def ingest_file(file_path, original_filename):
+    _, file_extension = os.path.splitext(original_filename)
+    if file_extension in ['.txt']:
+        ingester = TextIngester(vectorstore)
+    elif file_extension in ['.mkv', '.mp4']:
+        ingester = VideoIngester(vectorstore)
+    elif file_extension in ['.pdf']:
+        ingester = PDFIngester(vectorstore)
+    else:
+        raise ValueError('Unsupported file type for ingestion')
+    ingester.ingest_file(file_path)
 
 
 def plot_embeddings(embeddings, documents):
@@ -46,7 +44,7 @@ def plot_embeddings(embeddings, documents):
 
 
 def user_interface():
-    if len(st.session_state) == 0:
+    if not st.session_state.get('file_uploader'):
         st.session_state.file_uploader = []
 
     st.subheader("Ingest video files")
@@ -54,7 +52,7 @@ def user_interface():
     with st.form("file-uploader", clear_on_submit=True):
         uploaded_files = st.file_uploader(
             "Upload document",
-            type=["mp4", "mkv"],
+            type=ALL_DOC_TYPES,
             key=st.session_state.file_uploader,
             label_visibility="collapsed",
             accept_multiple_files=True,
@@ -68,8 +66,8 @@ def user_interface():
                 file_path = tf.name
 
             with st.session_state["ingestion_spinner"], st.spinner(f"Ingesting {file.name}"):
-                segment_count = ingester.ingest_video_file(file_path)
-            st.text(f"Ingested {segment_count} segments")
+                ingest_file(file_path, file.name)
+            st.text(f"Ingested {file}")
             os.remove(file_path)
 
     st.session_state["ingestion_spinner"] = st.empty()

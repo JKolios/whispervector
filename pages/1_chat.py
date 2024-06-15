@@ -3,8 +3,6 @@ import streamlit as st
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_community.llms import Ollama
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import OllamaEmbeddings
 
 from langchain.prompts import PromptTemplate
 from langchain.prompts.chat import (
@@ -12,20 +10,10 @@ from langchain.prompts.chat import (
     HumanMessagePromptTemplate,
 )
 
-import chromadb
+
+from Whispervector import vectorstore
 
 
-CHROMADB_COLLECTION = "transcripts"
-
-chromadb_client = chromadb.PersistentClient(path="./chromadb")
-# ensure that the collection exists
-chromadb_client.get_or_create_collection(CHROMADB_COLLECTION)
-
-vectorstore = Chroma(
-        client=chromadb_client,
-        collection_name=CHROMADB_COLLECTION,
-        embedding_function=OllamaEmbeddings(model='llama3'),
-)
 retriever = vectorstore.as_retriever()
 
 
@@ -36,11 +24,11 @@ rag_prompt = ChatPromptTemplate(
         HumanMessagePromptTemplate(
             prompt=PromptTemplate(
                 input_variables=['context', 'question'],
-                template="""You answer questions about the contents of a transcribed audio file. 
-                Use only the provided audio file transcription as context to answer the question. 
+                template="""You answer questions about the contents a PDF text file. 
+                Use only information from that text file to answer questions. 
                 Do not use any additional information.
                 If you don't know the answer, just say that you don't know. Do not use external knowledge. 
-                Make sure to reference your sources with quotes of the provided context as citations.
+                Make sure your answers are as exhaustive as possible.
                 \nQuestion: {question} \nContext: {context} \nAnswer:"""
                 )
         )
@@ -59,41 +47,53 @@ qa_chain = (
     | StrOutputParser()
 )
 
-st.set_page_config(page_title="WhisperVector")
 
 def user_interface():
-    if len(st.session_state) == 0:
+    if not st.session_state.get('messages'):
         st.session_state.messages = []
 
     st.header("WhisperVector")
 
-    st.subheader("LLM Chat")
+    st.subheader("Chat with RAG")
 
     for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
+        with st.chat_message(message["role"], avatar=message["avatar"]):
             st.markdown(message["content"])
 
     if prompt := st.chat_input("LLM Prompt"):
 
-        with st.chat_message("user"):
+        with st.chat_message("user", avatar="🧑"):
             st.session_state.messages.append(
                 {
                     'role': 'user',
                     'content': prompt,
+                    'avatar': "🧑"
                 }
             )
             st.markdown(prompt)
 
-        response = qa_chain.invoke(prompt)
+        rag_response = qa_chain.invoke(prompt)
+        base_llm_response = llm.invoke(prompt)
 
-        with st.chat_message("assistant"):
+        with st.chat_message("assistant", avatar="📚️"):
             st.session_state.messages.append(
                 {
                     "role": "assistant",
-                    "content": response
+                    "content": rag_response,
+                    'avatar': "📚"
                  }
             )
-            st.markdown(response)
+            st.markdown(rag_response)
+
+        with st.chat_message("assistant", avatar="🤖"):
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": base_llm_response,
+                    'avatar': "🤖"
+                 }
+            )
+            st.markdown(base_llm_response)
 
 
 if __name__ == "__main__":
